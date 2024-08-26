@@ -5,6 +5,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.SurfaceTexture
 import android.media.MediaCodec
 import android.media.MediaFormat
@@ -54,8 +55,11 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import fr.nrocher.testwificonnections.ui.theme.TestWifiConnectionsTheme
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
+import java.time.Instant
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 
@@ -63,6 +67,8 @@ import java.util.concurrent.CountDownLatch
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        var textureView: TextureView? = null
 
         val wifiHelper = WifiHelper(applicationContext, this)
 
@@ -192,6 +198,7 @@ class MainActivity : ComponentActivity() {
 
             var droneName by remember { mutableStateOf("") }
 
+            var droneState by remember { mutableStateOf<DroneState?>(null)}
 
             var wifiHelper_websocketConnection by remember { mutableStateOf<WebSocketClient?>(null) }
             val webSocketConnection by remember(wifiHelper_websocketConnection) { mutableStateOf(wifiHelper.websocketConnection?.isConnected ?: null) }
@@ -202,6 +209,77 @@ class MainActivity : ComponentActivity() {
 
             wifiHelper.udpLinkEstablishedCallback = { bool ->
                 udpLinkEstablished = bool
+            }
+
+            wifiHelper.droneStateCallback = { state ->
+                droneState = state
+
+                if(wifiHelper.websocketConnection?.isConnected == true) {
+                    Thread {
+                        val data = buildJsonObject {
+                            put("type", "state")
+                            put("time", Instant.now().toEpochMilli())
+                            put("data", droneState!!.toJson())
+                        }
+                        wifiHelper.websocketConnection?.sendMessage(data.toString())
+
+                        try {
+
+                            textureView?.bitmap?.let {
+                                // Bitmap is successfully captured
+                                val resizedBitmap =
+                                    Bitmap.createScaledBitmap(
+                                        it,
+                                        960,
+                                        720,
+                                        true
+                                    )
+                                val outputStream =
+                                    ByteArrayOutputStream()
+                                resizedBitmap.compress(
+                                    Bitmap.CompressFormat.PNG,
+                                    50,
+                                    outputStream
+                                )
+
+
+                                val base64String =
+                                    Base64.encodeToString(
+                                        outputStream.toByteArray(),
+                                        Base64.DEFAULT
+                                    )
+                                if (base64String != null) {
+                                    val data_img =
+                                        buildJsonObject {
+                                            put(
+                                                "type",
+                                                "img"
+                                            )
+                                            put(
+                                                "time",
+                                                Instant.now()
+                                                    .toEpochMilli()
+                                            )
+                                            put(
+                                                "data",
+                                                base64String
+                                            )
+                                        }
+                                    wifiHelper.websocketConnection?.sendMessage(
+                                        data_img.toString()
+                                    )
+                                }
+                            }
+                        } catch (err: Exception) {
+                            Log.e(
+                                "THREAD BUFFER",
+                                "ANN ERROR HAPPENDED : " + err
+                            )
+                        }
+
+
+                    }.start()
+                }
             }
 
             TestWifiConnectionsTheme {
@@ -225,7 +303,7 @@ class MainActivity : ComponentActivity() {
                                     factory = { context ->
                                         TextureView(context).apply {
 
-                                            val textureView = this
+                                            textureView = this
 
                                             surfaceTextureListener =
                                                 object : TextureView.SurfaceTextureListener {
@@ -247,8 +325,7 @@ class MainActivity : ComponentActivity() {
 
                                                         var lastDecodedBitmap: Bitmap? = null
 
-                                                        var and_surface =
-                                                            android.view.Surface(textureView.surfaceTexture)
+                                                        var and_surface = android.view.Surface(textureView?.surfaceTexture)
 
                                                         Thread {
                                                             try {
@@ -258,13 +335,14 @@ class MainActivity : ComponentActivity() {
                                                                     )
                                                                 mCodec.configure(
                                                                     format,
-                                                                    and_surface,
+                                                                   and_surface,
                                                                     null,
                                                                     0
                                                                 )
                                                                 mCodec.start()
 
                                                                 var previousPacket = byteArrayOf()
+
 
                                                                 wifiHelper.videoBufferCallback =
                                                                     { frame ->
@@ -298,23 +376,19 @@ class MainActivity : ComponentActivity() {
                                                                                 }
                                                                             }
 
-                                                                            val bufferInfo1 =
-                                                                                MediaCodec.BufferInfo()
-                                                                            val outputIndex: Int =
-                                                                                mCodec.dequeueOutputBuffer(
-                                                                                    bufferInfo1,
-                                                                                    0
-                                                                                )
+                                                                            val bufferInfo1 = MediaCodec.BufferInfo()
+                                                                            val outputIndex: Int = mCodec.dequeueOutputBuffer(bufferInfo1, 0)
+
                                                                             if (outputIndex >= 0) {
+
                                                                                 mCodec.releaseOutputBuffer(
                                                                                     outputIndex,
                                                                                     true
                                                                                 )
+
                                                                             }
 
-                                                                            previousPacket =
-                                                                                byteArrayOf()
-
+                                                                            previousPacket = byteArrayOf()
                                                                         }
                                                                     }
 
@@ -325,10 +399,11 @@ class MainActivity : ComponentActivity() {
                                                                         CountDownLatch(1) // CountDownLatch to wait for PixelCopy to finish
 
                                                                     Thread {
+                                                                        if(textureView != null){
                                                                         val bitmap =
                                                                             Bitmap.createBitmap(
-                                                                                textureView.width,
-                                                                                textureView.height,
+                                                                                textureView!!.width,
+                                                                                textureView!!.height,
                                                                                 Bitmap.Config.ARGB_8888
                                                                             )
                                                                         PixelCopy.request(
@@ -352,7 +427,7 @@ class MainActivity : ComponentActivity() {
                                                                                         ByteArrayOutputStream()
                                                                                     resizedBitmap.compress(
                                                                                         Bitmap.CompressFormat.PNG,
-                                                                                        100,
+                                                                                        75,
                                                                                         outputStream
                                                                                     )
                                                                                     val byteArray =
@@ -374,6 +449,7 @@ class MainActivity : ComponentActivity() {
                                                                             },
                                                                             handler
                                                                         )
+                                                                    }
                                                                     }.start()
 
                                                                     try {
@@ -567,8 +643,12 @@ class MainActivity : ComponentActivity() {
                                     },
                                     contentDescription = "TTS",
                                     iconResourceId = R.drawable.baseline_record_voice_over_24,
-                                    modifier = Modifier.width(200.dp).height(200.dp),
-                                    iconModifier = Modifier.width(75.dp).height(75.dp)
+                                    modifier = Modifier
+                                        .width(200.dp)
+                                        .height(200.dp),
+                                    iconModifier = Modifier
+                                        .width(75.dp)
+                                        .height(75.dp)
                                 )
                             }
 
@@ -591,6 +671,13 @@ class MainActivity : ComponentActivity() {
                                     drone?.UP_DOWN_VELOCITY = clamp(y)
                                     drone?.YAW_VELOCITY = clamp(x)
                                 }
+
+                                Text(
+                                   text = "Orientation : ${droneState?.pitch} ${droneState?.roll} ${droneState?.yaw}\n" +
+                                           "Velocity dm/s : ${droneState?.vgx} ${droneState?.vgy} ${droneState?.vgz}\n" +
+                                           "Acceleration cm/s² : ${droneState?.agx} ${droneState?.agy} ${droneState?.agz}\n" +
+                                           "Tof : ${droneState?.tof}cm H : ${droneState?.h}cm Baro : ${droneState?.baro}m",
+                                )
 
                                 JoyStick(
                                     size = 175.dp,

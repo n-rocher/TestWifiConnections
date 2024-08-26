@@ -47,6 +47,8 @@ class WifiHelper(private val context: Context, private val activity: Activity) {
     var computerSendResponseCallback : ((String) -> Unit)? = null
     var udpLinkEstablishedCallback: ((Boolean) -> Unit)? = null
 
+    var droneStateCallback: ((DroneState) -> Unit)? = null
+
     var udpLinkEstablished: Boolean = false
 
     var sttCallback : ((String) -> Unit)? = null
@@ -356,7 +358,7 @@ class WifiHelper(private val context: Context, private val activity: Activity) {
                 // Local WiFi connected
                 Log.i("WIFIHELPER", "CONNECTED TO DRONE")
 
-                val tello = KTello(network, computerSendResponseCallback) // Here we specify the network the UDP socket should go to
+                val tello = KTello(network, computerSendResponseCallback, droneStateCallback) // Here we specify the network the UDP socket should go to
                 tello.connect()  // Send Drone commands
 
                 Thread.sleep(500)
@@ -375,7 +377,6 @@ class WifiHelper(private val context: Context, private val activity: Activity) {
 
                 // Thread to receive the UDP packet from video from the drone
                 Thread {
-
                     val droneSocket = DatagramSocket(11111)
                     network.bindSocket(droneSocket)
 
@@ -390,9 +391,7 @@ class WifiHelper(private val context: Context, private val activity: Activity) {
                             val packet = DatagramPacket(receivePacket.data, receivePacket.length, computerAddress, 43210)
                             serverSocket.send(packet)
                         }
-
                     }
-
                 }.start()
 
                 Thread {
@@ -419,9 +418,7 @@ class WifiHelper(private val context: Context, private val activity: Activity) {
         }
 
         connectivityManager.requestNetwork(request, networkCallback, 25000)
-
         return deferred.await()
 
     }
-
 }

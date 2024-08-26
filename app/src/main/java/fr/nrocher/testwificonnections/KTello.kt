@@ -7,8 +7,13 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.nio.charset.StandardCharsets
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.encodeToJsonElement
 
-class KTello(private var network: Network, private var computerSendResponseCallback: ((String) -> Unit)?) {
+class KTello(private var network: Network, private var computerSendResponseCallback: ((String) -> Unit)?, private var droneStateCallback: ((DroneState) -> Unit)?) {
 
     var LEFT_RIGHT_VELOCITY: Int = 0
     var FORWARD_BACKWARD_VELOCITY: Int = 0
@@ -86,7 +91,6 @@ class KTello(private var network: Network, private var computerSendResponseCallb
 //        stateSocket!!.connect(ip!!, port)
 
         Thread {
-
             while (isConnected) {
                 val buffer = ByteArray(1024)
                 val packet = DatagramPacket(buffer, buffer.size)
@@ -95,8 +99,8 @@ class KTello(private var network: Network, private var computerSendResponseCallb
                 val length = packet.length
                 val stateSTR = String(data, 0, length)
                 state = parseDroneState(stateSTR)
+                droneStateCallback?.invoke(state)
             }
-
         }.start()
 
     }
@@ -266,6 +270,7 @@ class KTello(private var network: Network, private var computerSendResponseCallb
 
 }
 
+@Serializable
 data class DroneState(
     val mid: Int = -1,
     val x: Float = 0f,
@@ -291,6 +296,9 @@ data class DroneState(
 ) {
     override fun toString(): String {
         return "DroneState(mid=$mid, x=$x, y=$y, z=$z, mpry=$mpry, pitch=$pitch, roll=$roll, yaw=$yaw, vgx=$vgx, vgy=$vgy, vgz=$vgz, templ=$templ, temph=$temph, tof=$tof, h=$h, bat=$bat, baro=$baro, time=$time, agx=$agx, agy=$agy, agz=$agz)"
+    }
+    fun toJson(): JsonElement {
+        return Json.encodeToJsonElement(this)
     }
 }
 
